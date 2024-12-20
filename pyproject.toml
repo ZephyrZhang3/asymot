@@ -1,0 +1,23 @@
+[project]
+name = "asymot"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "diffusers>=0.31.0",
+    "h5py>=3.12.1",
+    "ipykernel>=6.29.5",
+    "matplotlib>=3.9.4",
+    "numpy>=2.0.2",
+    "pandas>=2.2.3",
+    "pillow>=11.0.0",
+    "torch>=2.5.1",
+    "torchvision>=0.20.1",
+]
+
+[dependency-groups]
+dev = [
+    "ipywidgets>=8.1.5",
+    "notebook>=7.3.1",
+]
