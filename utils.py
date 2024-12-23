@@ -27,8 +27,37 @@ def load_dataset(name):
     pass
 
 
-def get_intermediate_datasets_generator(source_dataset, taget_dataset, noise_type):
-    pass
+def get_ddim_path(x, dm_scheduler, pivotal_list=None, reverse=True):
+    ddim_path = [x.clone()]
+    if pivotal_list is None:
+        loop_range = range(dm_scheduler.config.num_train_timesteps)
+    else:
+        loop_range = range(
+            min(dm_scheduler.config.num_train_timesteps, pivotal_list[-1])
+        )
+    for i in loop_range:
+        x_prev = ddim_path[-1]
+        x_t = dm_scheduler.add_noise(
+            x_prev, torch.randn_like(x_prev), torch.Tensor([i]).long()
+        )
+        if pivotal_list is None:
+            ddim_path.append(x_t)
+        else:
+            if (i + 1) in pivotal_list:
+                ddim_path.append(x_t)
+    if reverse:
+        ddim_path.reverse()
+
+    return ddim_path
+
+
+def get_flow_path(source, target, total_step=1000):
+    flow_path = []
+    for i in range(total_step):
+        t = i / total_step
+        flow_path.append(t * target + (1 - t) * source)
+
+    return flow_path
 
 
 def get_all_pivotal(source, target, dm_scheduler, pivotal_list):
@@ -119,7 +148,7 @@ def cod_prob_bound(
     RV = _reletive_variance(dataset, query_point, distance_type, p)
     RV_weight = np.pow(((2 / (np.pow((1 + epsilon), p) - 1)) + 1), 2)
     prob_bound = np.pow(max(0, 1 - RV_weight * RV), n)
-    print(f"{n=} {p=} {epsilon=} {distance_type=}\n{RV=}\n{prob_bound=}")
+    # print(f"{n=} {p=} {epsilon=} {distance_type=}\n{RV=}\n{prob_bound=}")
     return prob_bound
 
 
@@ -137,20 +166,21 @@ def estimate_cod_prob_bound(
     RV = _estimate_reletive_variance(dataset, r, query_point, distance_type, p)
     RV_weight = np.pow(((2 / (np.pow((1 + epsilon), p) - 1)) + 1), 2) * (1 - 1 / r**2)
     prob_bound = np.pow(max(0, 1 - 1 / r - RV_weight * RV), n)
-    print(f"{n=} {r=} {p=} {epsilon=} {distance_type=}\n{RV=}\n{prob_bound=}")
+    # print(f"{n=} {r=} {p=} {epsilon=} {distance_type=}\n{RV=}\n{prob_bound=}")
     return prob_bound
 
 
 def _reletive_variance(dataset, query_point=None, distance_type="euclidean", p=1):
-    if query_point is None:
-        query_point = torch.zeros_like(dataset[0][0])
-
     distance = []
     if isinstance(dataset, torch.utils.data.Dataset):
         for x, _ in dataset:
+            if query_point is None:
+                query_point = torch.zeros_like(x)
             distance.append(np.pow(_distance(x, query_point, distance_type), p))
     elif isinstance(dataset, torch.Tensor):
         for x in dataset:
+            if query_point is None:
+                query_point = torch.zeros_like(x)
             distance.append(np.pow(_distance(x, query_point, distance_type), p))
     else:
         raise ValueError("Invalid dataset type")
@@ -165,19 +195,20 @@ def _reletive_variance(dataset, query_point=None, distance_type="euclidean", p=1
 def _estimate_reletive_variance(
     dataset, num_observed_samples, query_point=None, distance_type="euclidean", p=1
 ):
-    if query_point is None:
-        query_point = torch.zeros_like(dataset[0][0])
-
     indices = np.random.choice(len(dataset), num_observed_samples, replace=False)
 
     distance = []
     if isinstance(dataset, torch.utils.data.Dataset):
         observed_dataset = torch.utils.data.Subset(dataset, indices)
         for x, _ in observed_dataset:
+            if query_point is None:
+                query_point = torch.zeros_like(x)
             distance.append(np.pow(_distance(x, query_point, distance_type), p))
     elif isinstance(dataset, torch.Tensor):
         observed_dataset = dataset[indices]
         for x in observed_dataset:
+            if query_point is None:
+                query_point = torch.zeros_like(x)
             distance.append(np.pow(_distance(x, query_point, distance_type), p))
     else:
         raise ValueError("Invalid dataset type")
