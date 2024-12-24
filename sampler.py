@@ -131,6 +131,64 @@ class PairedDataset(Dataset):
         return len(self.data_paths)
 
 
+def get_paired_dataset(
+    name,
+    path,
+    transform=None,
+    reverse=False,
+):
+    if name == "FS2K":
+        source_folder, target_folder = "sketch", "photo"
+        train_set = PairedDataset(
+            os.path.join(path, "train", source_folder),
+            os.path.join(path, "train", target_folder),
+            transform=transform,
+            reverse=reverse,
+            hflip=True,
+        )
+        test_set = PairedDataset(
+            os.path.join(path, "test", source_folder),
+            os.path.join(path, "test", target_folder),
+            transform=transform,
+            reverse=reverse,
+            hflip=True,
+        )
+    elif name in [
+        "comic_faces",
+        "comic_faces_v1",
+        "celeba_mask",
+        "aligned_anime_faces_sketch",
+        "safebooru_sketch",
+    ]:
+        if name == "comic_faces":
+            source_folder, target_folder = "faces", "comics"
+        elif name == "comic_faces_v1":
+            source_folder, target_folder = "face", "comics"
+        elif name == "celeba_mask":
+            source_folder, target_folder = "CelebAMask-HQ-mask-color", "CelebA-HQ-img"
+        elif name == "safebooru_sketch":
+            source_folder, target_folder = "safebooru_sketch", "safebooru_jpeg"
+        else:
+            source_folder, target_folder = "sketch", "image"
+
+        dataset = PairedDataset(
+            os.path.join(path, source_folder),
+            os.path.join(path, target_folder),
+            transform=transform,
+            reverse=reverse,
+            hflip=True,
+        )
+        idx = list(range(len(dataset)))
+        test_ratio = 0.1
+        test_size = int(len(idx) * test_ratio)
+        train_idx, test_idx = idx[:-test_size], idx[-test_size:]
+        train_set, test_set = Subset(dataset, train_idx), Subset(dataset, test_idx)
+    else:
+        raise Exception("Unknown dataset")
+
+    return train_set, test_set
+
+
 class PairedLoaderSampler(Sampler):
     def __init__(self, loader, device="cpu"):
         super(PairedLoaderSampler, self).__init__(device)

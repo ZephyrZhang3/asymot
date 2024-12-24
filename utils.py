@@ -27,62 +27,60 @@ def load_dataset(name):
     pass
 
 
-def get_ddim_path(x, dm_scheduler, pivotal_list=None, reverse=True):
+@torch.no_grad()
+def get_ddim_path(
+    x,
+    dm_scheduler,
+    reverse: bool,
+    pivotal_list=None,
+):
     ddim_path = [x.clone()]
+
     if pivotal_list is None:
         loop_range = range(dm_scheduler.config.num_train_timesteps)
     else:
         loop_range = range(
             min(dm_scheduler.config.num_train_timesteps, pivotal_list[-1])
         )
-    for i in loop_range:
-        x_prev = ddim_path[-1]
-        x_t = dm_scheduler.add_noise(
-            x_prev, torch.randn_like(x_prev), torch.Tensor([i]).long()
-        )
-        if pivotal_list is None:
-            ddim_path.append(x_t)
-        else:
-            if (i + 1) in pivotal_list:
-                ddim_path.append(x_t)
+    for t in loop_range:
+        x_t = ddim_path[-1]
+        noise = torch.randn_like(x_t)
+        timestep = torch.Tensor([t]).long()
+        x_t_next = dm_scheduler.add_noise(x_t, noise, timestep)
+
+        if pivotal_list is None or (t + 1) in pivotal_list:
+            ddim_path.append(x_t_next)
+
     if reverse:
-        ddim_path.reverse()
+        ddim_path = ddim_path[::-1]
 
-    return ddim_path
+    return torch.stack(ddim_path, dim=0)
 
 
-def get_flow_path(source, target, total_step=1000):
+@torch.no_grad()
+def get_ddib_path(x, y, dm_scheduler, pivotal_list=None, skip_last=True):
+    x2g_path = get_ddim_path(x, dm_scheduler, reverse=False, pivotal_list=pivotal_list)
+
+    g2y_path = get_ddim_path(y, dm_scheduler, reverse=True, pivotal_list=pivotal_list)
+
+    if skip_last:
+        g2y_path = g2y_path[1:]  # just using x's last pivotal point
+
+    return torch.cat([x2g_path, g2y_path], dim=0)
+
+
+@torch.no_grad()
+def get_flow_path(x, y, total_step=1000):
     flow_path = []
     for i in range(total_step):
         t = i / total_step
-        flow_path.append(t * target + (1 - t) * source)
+        flow_path.append((1 - t) * x + t * y)
 
     return flow_path
 
 
-def get_all_pivotal(source, target, dm_scheduler, pivotal_list):
-    pivotal_path = []
-
-    source_list = [source]
-    target_list = [target]
-    for i in range(min(dm_scheduler.config.num_train_timesteps, pivotal_list[-1])):
-        source = dm_scheduler.add_noise(
-            source, torch.randn_like(source), torch.Tensor([i]).long()
-        )
-        target = dm_scheduler.add_noise(
-            target, torch.randn_like(target), torch.Tensor([i]).long()
-        )
-        if (i + 1) in pivotal_list:
-            source_list.append(source)
-            target_list.append(target)
-
-    target_list.reverse()
-
-    pivotal_path.extend(source_list)
-    pivotal_path.extend(target_list[1:])  # just using source's last pivotal point
-    # pivotal_path.extend(target_list[:]) # 2 last pivotal points mapping
-
-    return pivotal_path
+def get_schodier_path(source, target, total_step=1000):
+    pass
 
 
 def h5py_to_dataset(path, img_size=64):
