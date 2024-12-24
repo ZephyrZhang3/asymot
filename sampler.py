@@ -4,12 +4,9 @@ import random
 import numpy as np
 import torch
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
-from torchvision import datasets
-from torchvision.datasets import ImageFolder
+from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.transforms import (
     Compose,
-    Lambda,
     Normalize,
     Resize,
     ToTensor,
@@ -40,134 +37,6 @@ class Sampler:
 
     def sample(self, size=5):
         pass
-
-
-class LoaderSampler(Sampler):
-    def __init__(self, loader, device="cpu"):
-        super(LoaderSampler, self).__init__(device)
-        self.loader = loader
-        self.it = iter(self.loader)
-
-    def sample(self, size=5):
-        assert size <= self.loader.batch_size
-        try:
-            batch, _ = next(self.it)
-        except StopIteration:
-            self.it = iter(self.loader)
-            return self.sample(size)
-        if len(batch) < size:
-            return self.sample(size)
-
-        return batch[:size].to(self.device)
-
-
-def get_loader_sampler(
-    name,
-    path,
-    img_size=64,
-    batch_size=64,
-    device="cpu",
-    load_ambient=False,
-    num_workers=8,
-):
-    if name.startswith("MNIST"):
-        # In case of using certain class from the MNIST dataset you need to specify them by writing in the next format "MNIST_{digit}_{digit}_..._{digit}"
-        transform = Compose(
-            [
-                Resize((32, 32)),
-                ToTensor(),
-                Lambda(lambda x: 2 * x - 1),
-            ]
-        )
-
-        classes = [int(number) for number in name.split("_")[1:]]
-        if not classes:
-            classes = [i for i in range(10)]
-
-        train_set = datasets.MNIST(path, train=True, transform=transform, download=True)
-        test_set = datasets.MNIST(path, train=False, transform=transform, download=True)
-
-        train_test = []
-
-        for dataset in [train_set, test_set]:
-            data = []
-            labels = []
-            for k in range(len(classes)):
-                data.append(
-                    torch.stack(
-                        [
-                            dataset[i][0]
-                            for i in range(len(dataset.targets))
-                            if dataset.targets[i] == classes[k]
-                        ],
-                        dim=0,
-                    )
-                )
-                labels += [k] * data[-1].shape[0]
-            data = torch.cat(data, dim=0)
-            data = data.reshape(-1, 1, 32, 32)
-            labels = torch.tensor(labels)
-
-            train_test.append(TensorDataset(data, labels))
-
-        train_set, test_set = train_test
-        train_sampler = LoaderSampler(
-            DataLoader(
-                train_set, shuffle=True, num_workers=num_workers, batch_size=batch_size
-            ),
-            device,
-        )
-        test_sampler = LoaderSampler(
-            DataLoader(
-                test_set, shuffle=True, num_workers=num_workers, batch_size=batch_size
-            ),
-            device,
-        )
-        return train_sampler, test_sampler
-    # ===============================================================================================
-    # load dataset
-    if name in [
-        "comics",
-        "faces",
-    ]:
-        transform = Compose(
-            [
-                Resize((img_size, img_size)),
-                ToTensor(),
-                Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-            ]
-        )
-        dataset = ImageFolder(path, transform=transform)
-
-        # generate index list
-        idx = list(range(len(dataset)))
-        if name == "faces":
-            idx = np.array(idx)[np.array(dataset.targets) == 1]
-        else:
-            idx = np.array(idx)[np.array(dataset.targets) == 0]
-
-        # splite train test dataset
-        test_ratio = 0.1
-        test_size = int(len(idx) * test_ratio)
-        train_idx, test_idx = idx[:-test_size], idx[-test_size:]
-
-        train_set, test_set = Subset(dataset, train_idx), Subset(dataset, test_idx)
-        # print(len(train_idx), len(test_idx))
-
-        # generate LoaderSampler
-        train_sampler = LoaderSampler(
-            DataLoader(
-                train_set, shuffle=True, num_workers=num_workers, batch_size=batch_size
-            ),
-            device,
-        )
-        test_sampler = LoaderSampler(
-            DataLoader(
-                test_set, shuffle=True, num_workers=num_workers, batch_size=batch_size
-            ),
-            device,
-        )
-        return train_sampler, test_sampler
 
 
 # ====================== Paired Guided ====================== #
@@ -256,73 +125,7 @@ class PairedDataset(Dataset):
         if self.transform:
             x = self.transform(x)
             y = self.transform(y)
-        return (
-            (
-                x,
-                y,
-            )
-            if not self.reverse
-            else (
-                y,
-                x,
-            )
-        )
-
-    def __len__(self):
-        return len(self.data_paths)
-
-
-def split_glued_image(im):
-    w, h = im.size
-    im_l, im_r = im.crop((0, 0, w // 2, h)), im.crop((w // 2, 0, w, h))
-    return im_l, im_r
-
-
-class GluedDataset(Dataset):
-    def __init__(
-        self,
-        path,
-        transform=None,
-        reverse=False,
-        hflip=False,
-        vflip=False,
-        crop=None,
-        rotate=False,
-    ):
-        self.path = path
-        self.transform = transform
-        self.data_paths = [
-            os.path.join(path, file)
-            for file in os.listdir(path)
-            if (
-                os.path.isfile(os.path.join(path, file))
-                and file[-4:] in [".png", ".jpg"]
-            )
-        ]
-        self.reverse = reverse
-        self.hflip = hflip
-        self.vflip = vflip
-        self.crop = crop
-        self.rotate = rotate
-
-    def __getitem__(self, index):
-        xy = Image.open(self.data_paths[index])
-        x, y = split_glued_image(xy)
-        if self.reverse:
-            x, y = y, x
-        if self.crop is not None:
-            x, y = paired_random_crop(x, y, size=self.crop)
-        if self.hflip:
-            x, y = paired_random_hflip(x, y)
-        if self.vflip:
-            x, y = paired_random_vflip(x, y)
-        if self.rotate:
-            x, y = paired_random_rotate(x, y)
-        if self.transform:
-            x = self.transform(x)
-            y = self.transform(y)
-
-        return x, y
+        return (x, y) if not self.reverse else (y, x)
 
     def __len__(self):
         return len(self.data_paths)
