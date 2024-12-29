@@ -28,28 +28,56 @@ def load_dataset(name):
 
 
 @torch.no_grad()
+def add_ddim_noise_at_t_step(x_t, t, dm_scheduler):
+    noise = torch.randn_like(x_t)
+    timestep = torch.Tensor([t]).long()
+    x_t_next = dm_scheduler.add_noise(x_t, noise, timestep)
+
+    return x_t_next
+
+
+@torch.no_grad()
+def add_ddim_noise_t_times(x_0, dm_scheduler, t=1000):
+    x_t = add_ddim_noise_at_t_step(x_0, 0, dm_scheduler)
+    for i in range(1, t):
+        noise = torch.randn_like(x_t)
+        timestep = torch.Tensor([i]).long()
+        x_t = dm_scheduler.add_noise(x_t, noise, timestep)
+
+    return x_t
+
+
+@torch.no_grad()
+def qiuck_ddim_noise_t_times(x_0, dm_scheduler, t=1000):
+    alpha_t = dm_scheduler.scheduler.alphas_cumprod[t]
+    sqrt_alpha_t = alpha_t.sqrt()  # \(\sqrt{\bar{\alpha}_t}\)
+    sqrt_one_minus_alpha_t = (1 - alpha_t).sqrt()  # \(\sqrt{1 - \bar{\alpha}_t}\)
+    noise = torch.randn_like(x_0)
+    xt = sqrt_alpha_t * x_0 + sqrt_one_minus_alpha_t * noise  # 直接公式计算
+
+    return xt
+
+
+@torch.no_grad()
 def get_ddim_path(
     x,
     dm_scheduler,
     reverse: bool,
     pivotal_list=None,
 ):
-    ddim_path = [x.clone()]
+    ddim_path = [x]
 
     if pivotal_list is None:
-        loop_range = range(dm_scheduler.config.num_train_timesteps)
+        loop_range = range(1, dm_scheduler.config.num_train_timesteps)
     else:
         loop_range = range(
-            min(dm_scheduler.config.num_train_timesteps, pivotal_list[-1])
+            1, min(dm_scheduler.config.num_train_timesteps, pivotal_list[-1])
         )
     for t in loop_range:
-        x_t = ddim_path[-1]
-        noise = torch.randn_like(x_t)
-        timestep = torch.Tensor([t]).long()
-        x_t_next = dm_scheduler.add_noise(x_t, noise, timestep)
+        x_t = add_ddim_noise_at_t_step(ddim_path[-1], t, dm_scheduler)
 
         if pivotal_list is None or (t + 1) in pivotal_list:
-            ddim_path.append(x_t_next)
+            ddim_path.append(x_t)
 
     if reverse:
         ddim_path = ddim_path[::-1]
@@ -153,15 +181,13 @@ def cod_prob_bound(
 def estimate_cod_prob_bound(
     dataset,
     epsilon,
-    num_observed_samples=1000,
     query_point=None,
     distance_type="euclidean",
     n=2,
     p=1,
+    r=1000,  # the number of observed samples for estimation dataset distribution
 ):
-    r = num_observed_samples
-
-    RV = _estimate_reletive_variance(dataset, r, query_point, distance_type, p)
+    RV = _estimate_reletive_variance(dataset, query_point, distance_type, p, r)
     RV_weight = np.pow(((2 / (np.pow((1 + epsilon), p) - 1)) + 1), 2) * (1 - 1 / r**2)
     prob_bound = np.pow(max(0, 1 - 1 / r - RV_weight * RV), n)
     # print(f"{n=} {r=} {p=} {epsilon=} {distance_type=}\n{RV=}\n{prob_bound=}")
@@ -191,9 +217,13 @@ def _reletive_variance(dataset, query_point=None, distance_type="euclidean", p=1
 
 
 def _estimate_reletive_variance(
-    dataset, num_observed_samples, query_point=None, distance_type="euclidean", p=1
+    dataset,
+    query_point=None,
+    distance_type="euclidean",
+    p=1,
+    r=1000,  # the number of observed samples for estimation dataset distribution
 ):
-    indices = np.random.choice(len(dataset), num_observed_samples, replace=False)
+    indices = np.random.choice(len(dataset), r, replace=False)
 
     distance = []
     if isinstance(dataset, torch.utils.data.Dataset):
