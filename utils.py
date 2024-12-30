@@ -59,6 +59,16 @@ def qiuck_ddim_noise_t_times(x_0, dm_scheduler, t=1000):
 
 
 @torch.no_grad()
+def add_ddim_noise_between_start_end(x, dm_scheduler, start, end):
+    x_t = x
+    for i in range(start, end):
+        noise = torch.randn_like(x_t)
+        timestep = torch.Tensor([i]).long()
+        x_t = dm_scheduler.add_noise(x_t, noise, timestep)
+    return x_t
+
+
+@torch.no_grad()
 def get_ddim_path(
     x,
     dm_scheduler,
@@ -172,8 +182,8 @@ def cod_prob_bound(
     p=1,
 ):
     RV = _reletive_variance(dataset, query_point, distance_type, p)
-    RV_weight = np.pow(((2 / (np.pow((1 + epsilon), p) - 1)) + 1), 2)
-    prob_bound = np.pow(max(0, 1 - RV_weight * RV), n)
+    RV_weight = np.power(((2 / (np.power((1 + epsilon), p) - 1)) + 1), 2)
+    prob_bound = np.power(max(0, 1 - RV_weight * RV), n)
     # print(f"{n=} {p=} {epsilon=} {distance_type=}\n{RV=}\n{prob_bound=}")
     return prob_bound
 
@@ -188,8 +198,10 @@ def estimate_cod_prob_bound(
     r=1000,  # the number of observed samples for estimation dataset distribution
 ):
     RV = _estimate_reletive_variance(dataset, query_point, distance_type, p, r)
-    RV_weight = np.pow(((2 / (np.pow((1 + epsilon), p) - 1)) + 1), 2) * (1 - 1 / r**2)
-    prob_bound = np.pow(max(0, 1 - 1 / r - RV_weight * RV), n)
+    RV_weight = np.power(((2 / (np.power((1 + epsilon), p) - 1)) + 1), 2) * (
+        (r * r - 1) / (r * r)
+    )
+    prob_bound = np.power(max(0, 1 - (1 / r) - (RV_weight * RV)), n)
     # print(f"{n=} {r=} {p=} {epsilon=} {distance_type=}\n{RV=}\n{prob_bound=}")
     return prob_bound
 
@@ -197,22 +209,22 @@ def estimate_cod_prob_bound(
 def _reletive_variance(dataset, query_point=None, distance_type="euclidean", p=1):
     distance = []
     if isinstance(dataset, torch.utils.data.Dataset):
+        if query_point is None:
+            query_point = torch.zeros_like(dataset[0][0])
         for x, _ in dataset:
-            if query_point is None:
-                query_point = torch.zeros_like(x)
             distance.append(np.pow(_distance(x, query_point, distance_type), p))
     elif isinstance(dataset, torch.Tensor):
+        if query_point is None:
+            query_point = torch.zeros_like(dataset[0])
         for x in dataset:
-            if query_point is None:
-                query_point = torch.zeros_like(x)
             distance.append(np.pow(_distance(x, query_point, distance_type), p))
     else:
         raise ValueError("Invalid dataset type")
 
     distance = np.array(distance)
     mean = distance.mean()
-
     variance = distance.var()
+
     return variance / mean**2
 
 
@@ -228,15 +240,15 @@ def _estimate_reletive_variance(
     distance = []
     if isinstance(dataset, torch.utils.data.Dataset):
         observed_dataset = torch.utils.data.Subset(dataset, indices)
+        if query_point is None:
+            query_point = torch.zeros_like(observed_dataset[0][0])
         for x, _ in observed_dataset:
-            if query_point is None:
-                query_point = torch.zeros_like(x)
             distance.append(np.pow(_distance(x, query_point, distance_type), p))
     elif isinstance(dataset, torch.Tensor):
         observed_dataset = dataset[indices]
+        if query_point is None:
+            query_point = torch.zeros_like(observed_dataset[0])
         for x in observed_dataset:
-            if query_point is None:
-                query_point = torch.zeros_like(x)
             distance.append(np.pow(_distance(x, query_point, distance_type), p))
     else:
         raise ValueError("Invalid dataset type")
@@ -251,8 +263,10 @@ def _estimate_reletive_variance(
 
 def _distance(x, y, type="euclidean"):
     if type == "euclidean":
-        return np.linalg.norm(x - y)
-    elif type == "cosine":
-        return np.dot(x, y) / (np.linalg.norm(x) * np.linalg.norm(y))
+        # assert torch.linalg.vector_norm(x - y) == torch.linalg.norm(x - y)
+        return torch.linalg.vector_norm(x - y)
+        # return torch.nn.functional.mse_loss(x, y)
+        # return torch.nn.functional.pairwise_distance(x, y, p=2)
+        # return (x - y).norm()
     else:
         raise ValueError("Invalid distance type")

@@ -1,0 +1,24 @@
+# TODO LIST
+
+1. 数据集
+   - [√] FMNIST, MNIST, USPS
+   - [] cat -> dog：待实现
+   - [x] comic_faces_v1
+     - 实验现象：face -> comic 的 CoD 很低，与越高维越差的假设冲突。
+   - [x] celeba mask
+     - 实验现象：mask -> face 的 CoD 很低，与越高维越差的假设冲突。
+   - 猜测：可能和两个高维数据集都是 Paired 相关，而低维数据集目前是无配对的。
+2. 渐变
+   - [√] 扩散(DDIB)：X->高斯->Y，但高斯分布本身会造成严重距离聚集。
+3. CoD 概率下界计算
+   - [√] direct：x -> y
+   - [√] step by step：x_0 -> ... -> x_t -> x_t+1 -> ... -> y
+   - [] skip：x_0 -> x_k, x_k -> x_l, x_l -> y_k, y_k -> y
+4. 画图
+   - [√] direct：x -> y
+   - [√] step by step：x_0 -> ... -> x_t -> x_t+1 -> ... -> y
+   - [] skip：x_0 -> x_k, x_k -> x_l, x_l -> y_k, y_k -> y
+5. 大实验
+   - [] 级联 OT
+   - [] DDIB
+   - [] 其他
